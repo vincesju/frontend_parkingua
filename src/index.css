@@ -55,11 +55,10 @@ body {
 }
 
 #root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
+  width: 100%; /* Changed from 1126px to 100% */
+  margin: 0;
   text-align: center;
-  border-inline: 1px solid var(--border);
+  /* Removed border-inline to get rid of those side lines */
   min-height: 100svh;
   display: flex;
   flex-direction: column;

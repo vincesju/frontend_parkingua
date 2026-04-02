@@ -9,7 +9,6 @@ export default function AdminPanel() {
     const [search, setSearch] = useState('');
     const [isDecrypted, setIsDecrypted] = useState(false);
     
-    // State for the Verify Input
     const [verifyInput, setVerifyInput] = useState('');
     const [activeVerify, setActiveVerify] = useState('');
 
@@ -36,16 +35,8 @@ export default function AdminPanel() {
         } catch (err) { alert("Update failed"); }
     };
 
-    // Logic to handle the Verify Button click
-    const handleVerify = () => {
-        setActiveVerify(verifyInput.trim().toUpperCase());
-    };
-
-    // Logic to clear verification
-    const clearVerify = () => {
-        setVerifyInput('');
-        setActiveVerify('');
-    };
+    const handleVerify = () => { setActiveVerify(verifyInput.trim().toUpperCase()); };
+    const clearVerify = () => { setVerifyInput(''); setActiveVerify(''); };
 
     const getFee = (type) => type?.includes("2") ? 1000 : (type?.includes("Service") ? 3000 : 2000);
 
@@ -56,81 +47,108 @@ export default function AdminPanel() {
 
     return (
         <div className="center">
-            <div className="card dashboard-card">
-                <div className="topbar">
+            <div className="card admin-large-card">
+                
+                {/* TOPBAR */}
+                <div className="topbar" style={{ marginBottom: '20px' }}>
                     <div>
-                        <h2>UA Admin Panel</h2>
-                        <p className="subtitle">IT3B Finals • Secure Parking Management</p>
+                        <h2>UA Admin Management</h2>
+                        <p className="subtitle">IT3B Finals • System Overview</p>
                     </div>
-                    <div className="topbar-actions">
+                    <div className="topbar-actions" style={{ gap: '20px' }}>
                         <button className="btn-purple slim" onClick={fetchData}>Refresh System</button>
                         <button className="btn-blue slim" onClick={() => navigate('/')}>Logout</button>
                     </div>
                 </div>
 
-                {/* --- FUNCTIONAL QUICK VERIFY SECTION --- */}
-                <div className="panel">
-                    <h3>Quick Verify Sticker</h3>
-                    <div className="action-grid" style={{ gridTemplateColumns: '1fr auto auto', gap: '10px' }}>
+                {/* QUICK VERIFY */}
+                <div className="panel" style={{ textAlign: 'center', padding: '20px' }}>
+                    <h3 style={{ fontSize: '1.2rem', marginBottom: '15px' }}>Quick Verify Sticker</h3>
+                    <div style={{ maxWidth: '600px', margin: '0 auto' }}>
                         <input 
                             type="text" 
                             placeholder="Enter Sticker ID (e.g. UA-001)" 
                             value={verifyInput}
+                            style={{ textAlign: 'center', fontSize: '1.1rem', padding: '12px' }}
                             onChange={(e) => setVerifyInput(e.target.value)}
                         />
-                        <button className="btn-blue slim" onClick={handleVerify} style={{marginTop: '7px'}}>Verify Now</button>
-                        {activeVerify && (
-                            <button className="btn-gray slim" onClick={clearVerify} style={{marginTop: '7px'}}>Clear</button>
-                        )}
+                        <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '10px' }}>
+                            <button className="btn-blue" onClick={handleVerify} style={{ width: '200px' }}>Verify Now</button>
+                            {activeVerify && <button className="btn-gray" onClick={clearVerify} style={{ width: '100px' }}>Clear</button>}
+                        </div>
                     </div>
-                    {activeVerify && (
-                        <p style={{fontSize: '0.8rem', color: '#6366f1', marginTop: '5px'}}>
-                            Filtering by Sticker ID: <strong>{activeVerify}</strong>
-                        </p>
-                    )}
                 </div>
 
-                <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '25px' }}>
-                    <div className="stat-card"><h3>TOTAL APPLICATIONS</h3><p>{records.length}</p></div>
+                {/* STATS ROW */}
+                <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '15px', marginBottom: '20px' }}>
+                    <div className="stat-card"><h3>TOTAL APPS</h3><p>{records.length}</p></div>
                     <div className="stat-card" style={{ borderTop: '4px solid #ea580c' }}><h3 style={{color:'#ea580c'}}>PENDING</h3><p style={{color:'#ea580c'}}>{pendingCount}</p></div>
                     <div className="stat-card" style={{ borderTop: '4px solid #16a34a' }}><h3 style={{color:'#16a34a'}}>APPROVED</h3><p style={{color:'#16a34a'}}>{approvedCount}</p></div>
                     <div className="stat-card" style={{ borderTop: '4px solid #2563eb' }}><h3>REVENUE</h3><p>₱{totalRevenue.toLocaleString()}</p></div>
                 </div>
 
+                {/* TABLE PANEL */}
                 <div className="panel">
                     <div className="panel-header-with-filter">
                         <h3 style={{ margin: 0 }}>Application Records</h3>
                         <div className="filter-controls">
                             <button className={isDecrypted ? "btn-green slim" : "btn-gray slim"} onClick={() => setIsDecrypted(!isDecrypted)}>
-                                Data: {isDecrypted ? 'DECRYPTED' : 'HIDDEN'}
+                                {isDecrypted ? 'Hide Data' : 'Decrypt Data'}
                             </button>
-                            <input type="text" className="table-filter" placeholder="Filter by Plate..." onChange={(e) => setSearch(e.target.value.toLowerCase())} />
+                            <input type="text" className="table-filter" placeholder="Search Plate..." onChange={(e) => setSearch(e.target.value.toLowerCase())} />
                         </div>
                     </div>
 
                     <div className="table-wrap">
                         <table className="data-table">
                             <thead>
-                                <tr><th>Owner Name</th><th>Plate Number</th><th>Sticker ID</th><th>Vehicle Type</th><th>Fee</th><th>Status</th><th style={{ textAlign: 'right' }}>Manage</th></tr>
+                                <tr>
+                                    <th>Owner Name</th>
+                                    <th>Role & Details</th>
+                                    <th>Plate Number</th>
+                                    <th>Sticker ID</th>
+                                    <th>Type</th>
+                                    <th>Fee</th>
+                                    <th>Status</th>
+                                    <th style={{ textAlign: 'right' }}>Actions</th>
+                                </tr>
                             </thead>
                             <tbody>
                                 {records
                                     .filter(r => {
-                                        // 1. If Quick Verify is active, only show that Sticker ID
-                                        if (activeVerify) {
-                                            return r.sticker_id === activeVerify;
-                                        }
-                                        // 2. Otherwise, use the standard search filter
+                                        if (activeVerify) return r.sticker_id === activeVerify;
                                         return decryptData(r.plate_number).toLowerCase().includes(search);
                                     })
                                     .slice().reverse().map((v) => (
                                     <tr key={v.id}>
                                         <td style={{ fontWeight: 600 }}>{isDecrypted ? decryptData(v.owner_name) : v.owner_name}</td>
-                                        <td style={{ fontFamily: 'monospace', fontWeight: 800 }}>{isDecrypted ? decryptData(v.plate_number) : v.plate_number}</td>
-                                        <td style={{ color: '#2563eb', fontWeight: 800 }}>{v.sticker_id || '---'}</td>
+                                        
+                                        {/* ROLE INFO COLUMN */}
+                                        <td>
+                                            <div style={{ lineHeight: '1.2' }}>
+                                                <strong style={{ 
+                                                    display: 'block', 
+                                                    fontSize: '0.75rem', 
+                                                    color: v.role?.toLowerCase() === 'guest' ? '#2563eb' : '#ea580c',
+                                                    textTransform: 'uppercase' 
+                                                }}>
+                                                    {v.role || 'USER'}
+                                                </strong>
+                                                <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                                                    {v.identifier || 'N/A'}
+                                                </span>
+                                            </div>
+                                        </td>
+
+                                        <td className="bold-plate">{isDecrypted ? decryptData(v.plate_number) : v.plate_number}</td>
+                                        <td className="sticker-id-text">{v.sticker_id || '---'}</td>
                                         <td>{v.vehicle_type}</td>
-                                        <td style={{ fontWeight: 600 }}>₱{getFee(v.vehicle_type).toLocaleString()}</td>
-                                        <td><span className={`role-badge ${v.status === 'Approved' ? 'admin' : (v.status === 'Rejected' ? 'red' : '')}`}>{v.status}</span></td>
+                                        <td>₱{getFee(v.vehicle_type).toLocaleString()}</td>
+                                        <td>
+                                            <span className={`status-badge ${v.status.toLowerCase()}`}>
+                                                {v.status}
+                                            </span>
+                                        </td>
                                         <td style={{ textAlign: 'right' }}>
                                             {v.status === 'Pending' ? (
                                                 <div style={{ display: 'flex', gap: '5px', justifyContent: 'flex-end' }}>
@@ -143,11 +161,6 @@ export default function AdminPanel() {
                                 ))}
                             </tbody>
                         </table>
-                        {activeVerify && records.filter(r => r.sticker_id === activeVerify).length === 0 && (
-                            <div style={{textAlign: 'center', padding: '20px', color: '#ef4444'}}>
-                                No record found with Sticker ID: {activeVerify}
-                            </div>
-                        )}
                     </div>
                 </div>
             </div>
