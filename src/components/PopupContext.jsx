@@ -1,62 +1,57 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState } from 'react';
 import Popup from './Popup';
 
-// Context object that will share popup controls across the app tree.
+// Shared popup context for app-wide notifications.
 const PopupContext = createContext();
 
 /**
  * PopupProvider
- * Wrap your app (or a section of it) with this provider so any child
- * component can trigger user feedback popups (success, error, warning, info).
+ * Wrap this around app content so children can call usePopup().
  */
 export function PopupProvider({ children }) {
-    // Holds the currently visible popup payload.
-    // null means no popup is shown.
+    // Current popup payload. null means no popup is shown.
     const [popup, setPopup] = useState(null);
 
-    // Generic popup setter used by all specialized helper methods below.
-    // duration = 0 means the popup stays until the user closes it.
+    // Base setter used by specialized helpers below.
     const showPopup = (message, type = 'info', duration = 0) => {
         setPopup({ message, type, duration });
     };
 
-    // Clears popup state so the popup component unmounts from the UI.
+    // Removes popup from UI.
     const hidePopup = () => {
         setPopup(null);
     };
 
-    // Success messages are short-lived by default to reduce UI clutter.
+    // Convenience helpers with sensible defaults.
     const showSuccess = (message, duration = 3000) => {
         showPopup(message, 'success', duration);
     };
 
-    // Error messages default to persistent display so users do not miss them.
     const showError = (message, duration = 0) => {
         showPopup(message, 'error', duration);
     };
 
-    // Warning messages are also persistent by default.
     const showWarning = (message, duration = 0) => {
         showPopup(message, 'warning', duration);
     };
 
-    // Informational messages can be timed or persistent depending on caller.
     const showInfo = (message, duration = 0) => {
         showPopup(message, 'info', duration);
     };
 
     return (
-        // Expose popup actions through context so child components can call them.
-        <PopupContext.Provider value={{
-            showPopup,
-            showSuccess,
-            showError,
-            showWarning,
-            showInfo,
-            hidePopup
-        }}>
+        <PopupContext.Provider
+            value={{
+                showPopup,
+                showSuccess,
+                showError,
+                showWarning,
+                showInfo,
+                hidePopup
+            }}
+        >
             {children}
-            {/* Render popup only when state exists. */}
             {popup && (
                 <Popup
                     message={popup.message}
@@ -71,8 +66,7 @@ export function PopupProvider({ children }) {
 
 /**
  * usePopup
- * Convenience hook for accessing popup controls from context.
- * Throws a clear error if used outside PopupProvider to prevent silent bugs.
+ * Access popup controls from PopupContext.
  */
 export function usePopup() {
     const context = useContext(PopupContext);

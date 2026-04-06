@@ -7,66 +7,80 @@ import ParkingManagement from '../components/ParkingManagement';
 import { encryptDES, decryptDES } from '../utils/desCrypto';
 
 /**
+ * ============================================================
  * UserDashboard Component
- * Main user interface for parking applications and parking access.
- * Features: Application submission, status tracking, parking access, profile management.
+ * ============================================================
+ * 
+ * Main orchestrator page for logged-in users.
+ * Combines sticker management and parking management into one interface.
+ * 
+ * ARCHITECTURE:
+ * UserDashboard (this file) = State & API calls owner
+ *     ├── StickerManagement = Sticker applications + payment + records table
+ *     └── ParkingManagement = Parking slots visualization + reservations
+ * 
+ * Data Flow:
+ * 1. On mount: fetch user profile, parking stickers (records), parking slots, user reservations
+ * 2. Pass all data DOWN to child components as props (unidirectional data flow)
+ * 3. Child components call parent's callback functions (e.g., fetchUserRecords) to trigger refreshes
+ * 4. Example: User submits sticker app → StickerManagement calls fetchUserRecords → parent fetches updated list
+ * 
+ * State Organization:
+ * - User profile data: user, oldPassword, newPassword, etc. (account settings)
+ * - Sticker records: records (array of applications), plate, type (form inputs)
+ * - Parking data: parkingSlots, userReservations (shared with ParkingManagement)
+ * - UI state: showNotif, showSettings, activeTab, timeTick (visibility toggles and timing)
+ * 
+ * Key Functions:
+ * - fetchUserInfo(): GET user profile from /api/user/<username>
+ * - fetchUserRecords(): GET user's sticker applications from /api/sticker-records/
+ * - fetchUserReservations(): GET user's parking reservations
+ * - updatePassword(): PUT new password to backend
+ * - decryptData(): Decrypt plate numbers from encrypted storage
  */
 export default function UserDashboard() {
     const navigate = useNavigate();
     const { showError, showSuccess, showInfo } = usePopup();
-    const passwordRule = /^(?=.*[A-Z])(?=.*\d).{8,}$/;
-    const TOTAL_PARKING_SLOTS = 180;
+    const passwordRule = /^(?=.*[A-Z])(?=.*\d).{8,}$/; // Regex: at least 1 uppercase, 1 digit, 8+ chars
+    const TOTAL_PARKING_SLOTS = 180; // Total across all three parking areas (40 + 50 + 90)
 
-    // User and application data
-    const [user, setUser] = useState(null);
-    const [records, setRecords] = useState([]);
+    // ============ USER PROFILE STATE ============
+    // Data fetched from /api/user/<username> on component mount
+    const [user, setUser] = useState(null); // Current logged-in user (null until fetched)
+    const [records, setRecords] = useState([]); // Array of user's sticker applications (decrypted for display)
 
-    // Form and UI state
-    const [plate, setPlate] = useState('');
-    const [type, setType] = useState('4-Wheels');
-    const [showNotif, setShowNotif] = useState(false);
-    const [showSettings, setShowSettings] = useState(false);
-    const [showPaymentModal, setShowPaymentModal] = useState(false);
-    const [timeTick, setTimeTick] = useState(Date.now());
-    const [paymentMethod, setPaymentMethod] = useState('GCash');
-    const [paymentReference, setPaymentReference] = useState('');
+    // ============ STICKER APPLICATION FORM STATE ============
+    // Used by StickerManagement component
+    const [plate, setPlate] = useState(''); // Plate input (managed here but mainly used in child)
+    const [type, setType] = useState('4-Wheels'); // Vehicle type dropdown
+    const [showNotif, setShowNotif] = useState(false); // Toggle notification panel visibility
+    const [showSettings, setShowSettings] = useState(false); // Toggle settings/profile panel visibility
+    const [showPaymentModal, setShowPaymentModal] = useState(false); // Toggle payment modal visibility
+    const [timeTick, setTimeTick] = useState(Date.now()); // Current time (updated every 1 sec) - used for reservation expiration checks
+    const [paymentMethod, setPaymentMethod] = useState('GCash'); // Selected payment method
+    const [paymentReference, setPaymentReference] = useState(''); // Proof of payment reference
 
-    // Profile update state
-    const [oldPassword, setOldPassword] = useState('');
-    const [newPassword, setNewPassword] = useState('');
-    const [confirmNewPassword, setConfirmNewPassword] = useState('');
-    const [newIdentifier, setNewIdentifier] = useState('');
+    // ============ PROFILE UPDATE STATE ============
+    // Fields for password and identifier changes in settings panel
+    const [oldPassword, setOldPassword] = useState(''); // User's current password (for verification)
+    const [newPassword, setNewPassword] = useState(''); // New password (must match passwordRule)
+    const [confirmNewPassword, setConfirmNewPassword] = useState(''); // Confirmation field (must match newPassword)
+    const [newIdentifier, setNewIdentifier] = useState(''); // New student ID or identifier
 
-    // Parking functionality state
-    const [activeTab, setActiveTab] = useState('dashboard');
-    const [parkingSlots, setParkingSlots] = useState([]);
-    const [stickers, setStickers] = useState([]);
-    const [selectedParkingSlotId, setSelectedParkingSlotId] = useState(null);
-    const [selectedParkingAreaName, setSelectedParkingAreaName] = useState('Old Parking Space');
-    const [showParkForSelectedSpot, setShowParkForSelectedSpot] = useState(false);
-    const [parkStickerInput, setParkStickerInput] = useState('');
-    const [parkPlateInput, setParkPlateInput] = useState('');
+    // ============ PARKING FUNCTIONALITY STATE ============
+    // Shared with ParkingManagement component
+    const [activeTab, setActiveTab] = useState('dashboard'); // Which tab is visible
+    const [parkingSlots, setParkingSlots] = useState([]); // Array of all parking slots (180 total) with their status/occupant info
+    const [stickers, setStickers] = useState([]); // [DEPRECATED: unused] - was for sticker list
+    const [selectedParkingSlotId, setSelectedParkingSlotId] = useState(null); // Currently clicked slot ID
+    const [selectedParkingAreaName, setSelectedParkingAreaName] = useState('Old Parking Space'); // Active parking lot
+    const [showParkForSelectedSpot, setShowParkForSelectedSpot] = useState(false); // Toggle \"Park Vehicle\" form
+    const [parkStickerInput, setParkStickerInput] = useState(''); // Parking form: sticker ID input
+    const [parkPlateInput, setParkPlateInput] = useState(''); // Parking form: plate number input
     
-    // Multi-select and reservation state
-    const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
-    const [selectedSpotsForReservation, setSelectedSpotsForReservation] = useState(new Set());
-    const [reservationSelectionOrder, setReservationSelectionOrder] = useState([]);
-    const [showReservationModal, setShowReservationModal] = useState(false);
+    // Leave/check-out confirmation modal state
     const [showLeaveConfirmModal, setShowLeaveConfirmModal] = useState(false);
     const [leaveConfirmSlotId, setLeaveConfirmSlotId] = useState(null);
-    
-    // Reservation form state (single and multiple spots)
-    const [reserveStickerInput, setReserveStickerInput] = useState('');
-    const [reserveDate, setReserveDate] = useState('');
-    const [reserveTime, setReserveTime] = useState('');
-    const [reservationReasonText, setReservationReasonText] = useState('');
-    const [reservationReasonCategory, setReservationReasonCategory] = useState('');
-    const [reservationOrgName, setReservationOrgName] = useState('');
-    const [reservationEventName, setReservationEventName] = useState('');
-    const [reservationActivityForm, setReservationActivityForm] = useState('');
-    const [reservationRequesterName, setReservationRequesterName] = useState('');
-    const [reservationOrgPosition, setReservationOrgPosition] = useState('');
-    const [reservationModalError, setReservationModalError] = useState('');
     
     const [userReservations, setUserReservations] = useState([]);
     const [applicationRecordsPage, setApplicationRecordsPage] = useState(1);
@@ -540,232 +554,6 @@ export default function UserDashboard() {
         }
     };
 
-    const handleOpenReservationModal = () => {
-        const fallbackSingleSpot = selectedParkingSlotId ? [selectedParkingSlotId] : [];
-        const normalizedSpots = selectedSpotsForReservation.size > 0
-            ? Array.from(selectedSpotsForReservation)
-            : fallbackSingleSpot;
-        const validUserStickers = getValidUserStickers();
-
-        // Validate spot selection
-        if (normalizedSpots.length === 0) {
-            showError('Please select at least one parking spot to reserve.');
-            return;
-        }
-
-        if (normalizedSpots.length === 1 && validUserStickers.length === 0) {
-            showError("You can't reserve without any valid parking stickers.");
-            return;
-        }
-
-        // In single-select mode, use the currently selected spot as reservation target.
-        setSelectedSpotsForReservation(new Set(normalizedSpots));
-        setReservationSelectionOrder(normalizedSpots);
-
-        // Reset form and open modal
-        if (normalizedSpots.length === 1) {
-            setReserveStickerInput(validUserStickers[0] || '');
-        } else {
-            setReserveStickerInput('');
-        }
-        setReserveDate('');
-        setReserveTime('');
-        setReservationReasonText('');
-        setReservationReasonCategory('');
-        setReservationOrgName('');
-        setReservationEventName('');
-        setReservationActivityForm('');
-        setReservationRequesterName('');
-        setReservationOrgPosition('');
-        setReservationModalError('');
-        setShowReservationModal(true);
-    };
-
-    const handleUndoReservationSelection = () => {
-        if (reservationSelectionOrder.length === 0) return;
-        const lastSelectedSpot = reservationSelectionOrder[reservationSelectionOrder.length - 1];
-
-        setSelectedSpotsForReservation((prevSelected) => {
-            const nextSelected = new Set(prevSelected);
-            nextSelected.delete(lastSelectedSpot);
-            return nextSelected;
-        });
-        setReservationSelectionOrder((prevOrder) => prevOrder.slice(0, -1));
-    };
-
-    const handleClearReservationSelections = () => {
-        setSelectedSpotsForReservation(new Set());
-        setReservationSelectionOrder([]);
-    };
-
-    const handleToggleMultiSelectMode = () => {
-        setIsMultiSelectMode((prevMode) => {
-            const nextMode = !prevMode;
-            if (!nextMode) {
-                setSelectedSpotsForReservation(new Set());
-                setReservationSelectionOrder([]);
-            }
-            showInfo(`Select Multiple ${nextMode ? 'enabled' : 'disabled'}.`, 1000);
-            return nextMode;
-        });
-    };
-
-    const handleSubmitReservation = () => {
-        setReservationModalError('');
-
-        if (!reserveDate || !reserveTime) {
-            setReservationModalError('Please select reserve date and time.');
-            return;
-        }
-
-        const selectedDate = new Date(`${reserveDate}T${reserveTime}`);
-        if (Number.isNaN(selectedDate.getTime())) {
-            setReservationModalError('Invalid reserve date and time.');
-            return;
-        }
-
-        if (selectedDate <= new Date()) {
-            setReservationModalError('Reserve date/time must be in the future.');
-            return;
-        }
-
-        let sticker = 'N/A';
-        const validUserStickers = getValidUserStickers();
-
-        // Build reason text based on spot count
-        let finalReason = '';
-        let reservationCategoryPayload = 'single';
-        if (selectedSpotsForReservation.size === 1) {
-            if (validUserStickers.length === 0) {
-                setReservationModalError("You can't reserve without any valid parking stickers.");
-                return;
-            }
-            if (!reserveStickerInput.trim()) {
-                setReservationModalError('Please select your UA sticker ID.');
-                return;
-            }
-            sticker = reserveStickerInput.trim().toUpperCase();
-            if (!validUserStickers.includes(sticker)) {
-                setReservationModalError('Selected sticker ID is not valid for this account this semester.');
-                return;
-            }
-            const plateNumber = getPlateFromSticker(sticker);
-            if (!plateNumber) {
-                setReservationModalError('Invalid sticker ID or not valid for the current semester.');
-                return;
-            }
-
-            // Single spot: reason is just the text they entered
-            if (!reservationReasonText.trim()) {
-                setReservationModalError('Please provide a reason for the reservation.');
-                return;
-            }
-            finalReason = reservationReasonText.trim();
-        } else {
-            reservationCategoryPayload = reservationReasonCategory;
-
-            if (!reservationReasonCategory) {
-                setReservationModalError('Please choose a Reason Category first.');
-                return;
-            }
-
-            if (!reservationReasonText.trim()) {
-                setReservationModalError('Please provide a detailed reason for the reservation.');
-                return;
-            }
-
-            if (reservationReasonCategory === 'School Related Event') {
-                if (!reservationEventName.trim()) {
-                    setReservationModalError('Please enter Event Name.');
-                    return;
-                }
-                if (!reservationActivityForm.trim()) {
-                    setReservationModalError('Please enter Activity Form No.');
-                    return;
-                }
-                if (!reservationRequesterName.trim()) {
-                    setReservationModalError('Please enter the name of person requesting the reservation.');
-                    return;
-                }
-                finalReason = `Category: School Related Event | Event: ${reservationEventName.trim()} | Activity Form No: ${reservationActivityForm.trim()} | Requester: ${reservationRequesterName.trim()} | Details: ${reservationReasonText.trim()}`;
-            } else if (reservationReasonCategory === 'Org Related Event') {
-                if (!reservationOrgName.trim()) {
-                    setReservationModalError('Please enter Org Name.');
-                    return;
-                }
-                if (!reservationEventName.trim()) {
-                    setReservationModalError('Please enter Event Name.');
-                    return;
-                }
-                if (!reservationActivityForm.trim()) {
-                    setReservationModalError('Please enter Activity Form.');
-                    return;
-                }
-                if (!reservationRequesterName.trim()) {
-                    setReservationModalError('Please enter the name of person requesting the reservation.');
-                    return;
-                }
-                if (!reservationOrgPosition.trim()) {
-                    setReservationModalError('Please enter Org Position.');
-                    return;
-                }
-                finalReason = `Category: Org Related Event | Org: ${reservationOrgName.trim()} | Event: ${reservationEventName.trim()} | Activity Form: ${reservationActivityForm.trim()} | Requester: ${reservationRequesterName.trim()} | Position: ${reservationOrgPosition.trim()} | Details: ${reservationReasonText.trim()}`;
-            } else {
-                if (!reservationRequesterName.trim()) {
-                    setReservationModalError('Please enter the name of person requesting the reservation.');
-                    return;
-                }
-                finalReason = `Category: Others | Requester: ${reservationRequesterName.trim()} | Details: ${reservationReasonText.trim()}`;
-            }
-        }
-
-        // Submit reservation to backend API
-        const submitReservation = async () => {
-            try {
-                // Close modal immediately after submit click.
-                setShowReservationModal(false);
-
-                const response = await axios.post('http://127.0.0.1:8000/api/submit-reservation/', {
-                    username: user.username,
-                    sticker_id: sticker,
-                    reservation_category: reservationCategoryPayload,
-                    reserved_spots: Array.from(selectedSpotsForReservation),
-                    reservation_reason: finalReason,
-                    reserved_for_datetime: selectedDate.toISOString()
-                });
-
-                if (response.data.status === 'success') {
-                    showSuccess(`Reservation submitted for ${selectedSpotsForReservation.size} spot(s). Waiting for admin approval...`);
-                    
-                    // Clear form and reset state
-                    setReserveStickerInput('');
-                    setReserveDate('');
-                    setReserveTime('');
-                    setReservationReasonText('');
-                    setReservationReasonCategory('');
-                    setReservationOrgName('');
-                    setReservationEventName('');
-                    setReservationActivityForm('');
-                    setReservationRequesterName('');
-                    setReservationOrgPosition('');
-                    setSelectedSpotsForReservation(new Set());
-                    setReservationSelectionOrder([]);
-                    setIsMultiSelectMode(false);
-                    
-                    // Refresh reservations list
-                    fetchUserReservations(user.username);
-                } else {
-                    showError(response.data.message || 'Failed to submit reservation');
-                }
-            } catch (error) {
-                console.error('Reservation submission error:', error);
-                showError(error.response?.data?.message || 'Error submitting reservation');
-            }
-        };
-
-        submitReservation();
-    };
-
     const handleGuardReleaseReservation = () => {
         const selectedSlot = getSelectedParkingSlot();
         if (!selectedSlot) return;
@@ -924,9 +712,6 @@ export default function UserDashboard() {
         setShowParkForSelectedSpot(false);
         setParkStickerInput('');
         setParkPlateInput('');
-        setReserveStickerInput('');
-        setReserveDate('');
-        setReserveTime('');
     }, [selectedParkingSlotId, selectedParkingAreaName]);
 
     // Get unread notifications (application updates + reservation status updates)
@@ -1713,328 +1498,6 @@ export default function UserDashboard() {
                 </div>
 
                 </>)}
-
-                {showReservationModal && (
-                    <div style={{
-                        position: 'fixed',
-                        inset: 0,
-                        background: 'rgba(15, 23, 42, 0.55)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        zIndex: 9999,
-                        padding: '16px'
-                    }}>
-                        <div style={{
-                            width: '100%',
-                            maxWidth: '720px',
-                            background: '#ffffff',
-                            borderRadius: '16px',
-                            boxShadow: '0 24px 60px rgba(15, 23, 42, 0.25)',
-                            border: '1px solid #e2e8f0',
-                            padding: '24px'
-                        }}>
-                            <h3 style={{ margin: '0 0 12px', color: '#0f172a' }}>
-                                Reserve Spot{selectedSpotsForReservation.size > 1 ? 's' : ''}
-                            </h3>
-
-                            {reservationModalError && (
-                                <div style={{
-                                    marginBottom: '12px',
-                                    padding: '10px 12px',
-                                    borderRadius: '8px',
-                                    border: '1px solid #fecaca',
-                                    background: '#fef2f2',
-                                    color: '#b91c1c',
-                                    fontSize: '12px',
-                                    fontWeight: 700
-                                }}>
-                                    {reservationModalError}
-                                </div>
-                            )}
-
-                            {selectedSpotsForReservation.size === 1 ? (
-                                <>
-                                    <div style={{ marginBottom: '12px' }}>
-                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
-                                            UA Sticker ID
-                                        </label>
-                                        {(() => {
-                                            const singleSpotStickerOptions = getValidUserStickers();
-                                            if (singleSpotStickerOptions.length === 0) {
-                                                return (
-                                                    <div style={{ fontSize: '12px', color: '#b91c1c', fontWeight: 700 }}>
-                                                        No valid parking sticker available. Reservation is disabled.
-                                                    </div>
-                                                );
-                                            }
-                                            if (singleSpotStickerOptions.length === 1) {
-                                                return (
-                                                    <input
-                                                        type="text"
-                                                        value={singleSpotStickerOptions[0]}
-                                                        disabled
-                                                        style={{ background: '#f8fafc', color: '#334155' }}
-                                                    />
-                                                );
-                                            }
-                                            return (
-                                                <select
-                                                    value={reserveStickerInput}
-                                                    onChange={(e) => setReserveStickerInput(e.target.value)}
-                                                >
-                                                    {singleSpotStickerOptions.map((stickerOption) => (
-                                                        <option key={stickerOption} value={stickerOption}>{stickerOption}</option>
-                                                    ))}
-                                                </select>
-                                            );
-                                        })()}
-                                    </div>
-
-                                    <div style={{ marginBottom: '12px' }}>
-                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
-                                            Reason
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={reservationReasonText}
-                                            onChange={(e) => setReservationReasonText(e.target.value)}
-                                            placeholder="Why are you reserving this spot?"
-                                        />
-                                    </div>
-                                </>
-                            ) : (
-                                <>
-                                    <div style={{ marginBottom: '12px' }}>
-                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
-                                            Reason Category
-                                        </label>
-                                        <select value={reservationReasonCategory} onChange={(e) => setReservationReasonCategory(e.target.value)}>
-                                            <option value="" disabled>Select reason category</option>
-                                            <option value="Org Related Event">Org Related Event</option>
-                                            <option value="School Related Event">School Related Event</option>
-                                            <option value="Others">Others</option>
-                                        </select>
-                                    </div>
-
-                                    {reservationReasonCategory === 'School Related Event' && (
-                                        <>
-                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
-                                                <div>
-                                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
-                                                        Event Name
-                                                    </label>
-                                                    <input
-                                                        type="text"
-                                                        value={reservationEventName}
-                                                        onChange={(e) => setReservationEventName(e.target.value)}
-                                                        placeholder="Enter event name"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
-                                                        Activity Form No.
-                                                    </label>
-                                                    <input
-                                                        type="text"
-                                                        value={reservationActivityForm}
-                                                        onChange={(e) => setReservationActivityForm(e.target.value)}
-                                                        placeholder="Enter activity form number"
-                                                    />
-                                                </div>
-                                            </div>
-                                            <div style={{ marginBottom: '12px' }}>
-                                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
-                                                    Name of Person Requesting Reservation
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    value={reservationRequesterName}
-                                                    onChange={(e) => setReservationRequesterName(e.target.value)}
-                                                    placeholder="Enter full name"
-                                                />
-                                            </div>
-                                        </>
-                                    )}
-
-                                    {reservationReasonCategory === 'Org Related Event' && (
-                                        <>
-                                            <div style={{ marginBottom: '12px' }}>
-                                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
-                                                    Org Name
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    value={reservationOrgName}
-                                                    onChange={(e) => setReservationOrgName(e.target.value)}
-                                                    placeholder="Organization name"
-                                                />
-                                            </div>
-                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
-                                                <div>
-                                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
-                                                        Event Name
-                                                    </label>
-                                                    <input
-                                                        type="text"
-                                                        value={reservationEventName}
-                                                        onChange={(e) => setReservationEventName(e.target.value)}
-                                                        placeholder="Enter event name"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
-                                                        Activity Form
-                                                    </label>
-                                                    <input
-                                                        type="text"
-                                                        value={reservationActivityForm}
-                                                        onChange={(e) => setReservationActivityForm(e.target.value)}
-                                                        placeholder="Activity / event name"
-                                                    />
-                                                </div>
-                                            </div>
-                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
-                                                <div>
-                                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
-                                                        Name of Person Requesting Reservation
-                                                    </label>
-                                                    <input
-                                                        type="text"
-                                                        value={reservationRequesterName}
-                                                        onChange={(e) => setReservationRequesterName(e.target.value)}
-                                                        placeholder="Full name"
-                                                    />
-                                                </div>
-                                                <div>
-                                                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
-                                                        Org Position
-                                                    </label>
-                                                    <input
-                                                        type="text"
-                                                        value={reservationOrgPosition}
-                                                        onChange={(e) => setReservationOrgPosition(e.target.value)}
-                                                        placeholder="Position"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </>
-                                    )}
-
-                                    {reservationReasonCategory === 'Others' && (
-                                        <div style={{ marginBottom: '12px' }}>
-                                            <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
-                                                Name of Person Requesting Reservation
-                                            </label>
-                                            <input
-                                                type="text"
-                                                value={reservationRequesterName}
-                                                onChange={(e) => setReservationRequesterName(e.target.value)}
-                                                placeholder="Enter full name"
-                                            />
-                                        </div>
-                                    )}
-
-                                    <div style={{ marginBottom: '12px' }}>
-                                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
-                                            Detailed Reason
-                                        </label>
-                                        <textarea
-                                            value={reservationReasonText}
-                                            onChange={(e) => setReservationReasonText(e.target.value)}
-                                            placeholder="Write the full reservation reason here..."
-                                            rows={4}
-                                            style={{
-                                                width: '100%',
-                                                maxWidth: '100%',
-                                                boxSizing: 'border-box',
-                                                resize: 'vertical',
-                                                overflowY: 'auto'
-                                            }}
-                                        />
-                                    </div>
-                                </>
-                            )}
-
-                            <div style={{ marginBottom: '12px' }}>
-                                <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
-                                    Date and Time
-                                </label>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                                    <div>
-                                        <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>Calendar Date</div>
-                                        <input
-                                            type="date"
-                                            value={reserveDate}
-                                            onChange={(e) => setReserveDate(e.target.value)}
-                                            style={{
-                                                cursor: 'pointer',
-                                                background: '#f8fafc',
-                                                border: '1px solid #94a3b8',
-                                                color: '#0f172a',
-                                                colorScheme: 'light'
-                                            }}
-                                        />
-                                    </div>
-                                    <div>
-                                        <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px' }}>Time</div>
-                                        <input
-                                            type="time"
-                                            value={reserveTime}
-                                            onChange={(e) => setReserveTime(e.target.value)}
-                                            style={{
-                                                cursor: 'pointer',
-                                                background: '#f8fafc',
-                                                border: '1px solid #94a3b8',
-                                                color: '#0f172a',
-                                                colorScheme: 'light'
-                                            }}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            {isMultiSelectMode && (
-                                <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '16px' }}>
-                                    Selected spots: {Array.from(selectedSpotsForReservation).sort((a, b) => a - b).join(', ')}
-                                </div>
-                            )}
-
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                                <button
-                                    type="button"
-                                    className="btn-green"
-                                    onClick={handleSubmitReservation}
-                                    style={{ flex: 1, marginTop: 0 }}
-                                >
-                                    Submit Reservation
-                                </button>
-                                <button
-                                    type="button"
-                                    className="btn-gray"
-                                    onClick={() => {
-                                        setShowReservationModal(false);
-                                        setReservationModalError('');
-                                        setReserveStickerInput('');
-                                        setReserveDate('');
-                                        setReserveTime('');
-                                        setReservationReasonText('');
-                                        setReservationReasonCategory('');
-                                        setReservationOrgName('');
-                                        setReservationEventName('');
-                                        setReservationActivityForm('');
-                                        setReservationRequesterName('');
-                                        setReservationOrgPosition('');
-                                        setReservationSelectionOrder([]);
-                                    }}
-                                    style={{ flex: 1, marginTop: 0 }}
-                                >
-                                    Cancel
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
 
                 {showLeaveConfirmModal && (
                     <div style={{

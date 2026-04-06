@@ -5,7 +5,23 @@ import { encryptDES } from '../utils/desCrypto';
 
 /**
  * StickerManagement Component
- * Handles parking sticker applications, payment, and records
+ * 
+ * Handles the complete parking sticker application workflow:
+ * 1. Application Form: user submits plate number, vehicle type, and selects payment method
+ * 2. Payment Modal: user provides payment proof reference (e.g., GCash/BDO receipt number)
+ * 3. API Submission: encrypt sensitive data (plate, owner name) and POST to backend
+ * 4. Records Table: display all of user's past/current applications with pagination
+ * 
+ * Security: Plate numbers and owner names are encrypted using DES before transmission.
+ * Why encrypt? If backend or network is compromised, attacker sees garbled text, not actual plates.
+ * 
+ * Props:
+ *   - user: current logged-in user object (contains .username)
+ *   - records: array of user's sticker applications (from backend)
+ *   - paymentMethods: array of available payment options (e.g., [\"GCash\", \"BDO\", \"Remittance\"])
+ *   - displayFullName: user's full name (read-only in form, used for encryption)
+ *   - decryptData: function to decrypt plate numbers for display
+ *   - fetchUserRecords: function to refresh the records table after submission
  */
 export default function StickerManagement({
     user,
@@ -17,84 +33,110 @@ export default function StickerManagement({
 }) {
     const { showError, showSuccess } = usePopup();
 
-    // Application form state
-    const [plate, setPlate] = useState('');
-    const [type, setType] = useState('4-Wheels');
+    // ============ APPLICATION FORM STATE ============
+    // Step 1 of the sticker application flow
+    const [plate, setPlate] = useState(''); // Plate number entered by user (e.g., \"ABC1234\")
+    const [type, setType] = useState('4-Wheels'); // Vehicle type dropdown: \"2-Wheels\" | \"4-Wheels\" | \"Service\"
 
-    // Payment modal state
-    const [showPaymentModal, setShowPaymentModal] = useState(false);
-    const [paymentMethod, setPaymentMethod] = useState('GCash');
-    const [paymentReference, setPaymentReference] = useState('');
+    // ============ PAYMENT MODAL STATE ============
+    // Step 2 of the sticker application flow
+    const [showPaymentModal, setShowPaymentModal] = useState(false); // Toggle: show/hide the payment modal?
+    const [paymentMethod, setPaymentMethod] = useState('GCash'); // Selected payment method (GCash, BDO, etc.)
+    const [paymentReference, setPaymentReference] = useState(''); // User's proof of payment (e.g., reference number, receipt #)
 
-    // Table pagination state (records list)
+    // ============ TABLE PAGINATION STATE ============
+    // Tracks which page of records the user is viewing
     const [applicationRecordsPage, setApplicationRecordsPage] = useState(1);
 
-    // Number of rows shown per page in "My Application Records"
+    // ============ PAGINATION CONFIGURATION ============
+    // Number of records shown per page (keeps table manageable)
     const USER_RECORDS_PAGE_SIZE = 10;
 
-    // FEATURE STEP (Form UX): pressing Enter in the plate input
-    // performs the same action as clicking "Proceed to Payment".
+    // ============ FEATURE: KEYBOARD SHORTCUT FOR FORM SUBMISSION ============
+    // UX improvement: pressing Enter in plate input same as clicking \"Proceed to Payment\"
+    // e.key === 'Enter' detects the Return key press in the input field
     const handleApplicationKeyPress = (e) => {
         if (e.key === 'Enter') {
-            handleProceedToPayment(e);
+            handleProceedToPayment(e); // Trigger the form submission flow
         }
     };
 
-    // FEATURE STEP 1 (Application): validate first before opening the payment modal.
-    // e.preventDefault() stops the browser's default form submit/reload behavior.
+    // ============ FUNCTION: VALIDATE & OPEN PAYMENT MODAL ============
+    // Step 1: User clicking \"Proceed to Payment\" button → this handler executes
+    // Purpose: quick validation before showing payment modal
+    // e.preventDefault() blocks the browser's default form reload behavior
     const handleProceedToPayment = (e) => {
         e.preventDefault();
-        // This check prevents the flow from continuing without a plate number.
+        // Guard clause: plate is required before proceeding
         if (!plate.trim()) {
             showError('Please enter Plate Number before proceeding to payment.');
             return;
         }
-        // Only show the payment modal after the basic input is valid.
+        // If valid, show the payment modal overlay
         setShowPaymentModal(true);
     };
 
     /**
-    * FEATURE STEP 2 (Application): submit the sticker application to the backend.
-     *
+     * ============ FUNCTION: SUBMIT STICKER APPLICATION TO BACKEND ============
+     * Step 2: User fills payment modal and clicks \"Submit Application\"
+     * 
+     * SECURITY CRITICAL: This function encrypts sensitive data (plate, owner name)
+     * before sending them to the backend API.
+     * 
+     * Why encrypt?
+     * - If someone intercepts network traffic (MITM attack), they see encrypted garbage, not actual data
+     * - Even if backend database is stolen, attacker can't read the plates without the decryption key
+     * - Key is stored in codebase, so attacker needs to reverse-engineer or compromise source code
+     * 
      * Flow:
-     * 1) Validate required fields.
-     * 2) Encrypt sensitive values (owner and plate) using DES utility.
-     * 3) Send payload to API.
-     * 4) On success, reset UI and refresh records.
+     * 1) Validate all required fields (plate, payment method, proof of payment)
+     * 2) Encrypt sensitive fields: plate, displayFullName (owner)
+     * 3) POST encrypted payload + unencrypted metadata (vehicle type, payment method) to API
+     * 4) On success: reset form, close modal, refresh table to show new application
+     * 5) On error: show error message (backend returned failure or network error)
      */
     const submitApp = async () => {
-        // Required field checks before any encryption/network call.
+        // ============ VALIDATION PHASE ============
+        // Check all required fields before attempting encryption/network call
+        // Early return pattern: fail fast with user feedback, avoiding wasted computation
         if (!plate) return showError("Please enter Plate Number.");
         if (!paymentMethod) return showError("Please select payment method.");
         if (!paymentReference.trim()) return showError("Please enter payment reference number.");
 
-        // Encrypt sensitive data before sending it to the API.
-        // plate and owner are encrypted so they are not stored or transmitted as plain text.
-        const encPlate = encryptDES(plate);
-        const encOwner = encryptDES(displayFullName);
+        // ============ ENCRYPTION PHASE ============
+        // Encrypt sensitive data using DES algorithm (from desCrypto.js utility)
+        // encryptDES uses a hardcoded key shared between frontend and backend
+        const encPlate = encryptDES(plate); // Example: \"ABC1234\" → \"$sDf#1@8\"
+        const encOwner = encryptDES(displayFullName); // Example: \"John Doe\" → \"kX9$mL2#\"
         
         try {
-            // Backend receives encrypted ownerName and plateNumber.
+            // ============ SUBMISSION PHASE ============
+            // POST to backend with encrypted plate and owner, plus other metadata
+            // Backend will: 1) Store encrypted values in database,  2) Auto-decrypt using same key for display
             await axios.post('http://127.0.0.1:8000/api/submit-vehicle/', {
-                username: user.username,
-                ownerName: encOwner,
-                plateNumber: encPlate,
-                vehicleType: type,
-                paymentMethod,
-                paymentReference: paymentReference.trim()
+                username: user.username, // Current user's username (not encrypted, used to link application to user)
+                ownerName: encOwner, // ENCRYPTED full name of vehicle owner
+                plateNumber: encPlate, // ENCRYPTED vehicle plate number
+                vehicleType: type, // Not encrypted: \"2-Wheels\", \"4-Wheels\", or \"Service\"
+                paymentMethod, // Not encrypted: \"GCash\", \"BDO\", etc.
+                paymentReference: paymentReference.trim() // Not encrypted: reference number from payment proof
             });
 
-            // On success: show a message and reset the form for the next entry.
+            // ============ SUCCESS HANDLING ============
+            // Application saved! Reset UI and notify user
             showSuccess("Application Sent!");
-            setPlate('');
-            setPaymentMethod('GCash');
-            setPaymentReference('');
-            setShowPaymentModal(false);
+            setPlate(''); // Clear plate input
+            setPaymentMethod('GCash'); // Reset to default payment method
+            setPaymentReference(''); // Clear reference input
+            setShowPaymentModal(false); // Close payment modal
 
-            // Refresh the table immediately so the user can see the new application.
+            // Refresh the records table immediately so user sees their new application
+            // This triggers fetchUserRecords in parent, which fetches latest records from backend
             fetchUserRecords(user.username);
         } catch (err) {
-            // Prefer backend message when available, fallback to generic text.
+            // ============ ERROR HANDLING ============
+            // Backend error (400, 409, 500, etc.) or network failure
+            // Prefer backend's error message if provided, otherwise generic fallback
             showError(err?.response?.data?.message || "Submission failed.");
         }
     };
